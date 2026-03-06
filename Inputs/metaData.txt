@@ -1,0 +1,10 @@
+Sequencing_ID	Treatment
+Fat_S240	Fat
+Fat_S238	Fat
+Fat_S236	Fat
+Starch_S232	Starch
+Starch_S235	Starch
+Starch_S233	Starch
+Fat_S237	Fat
+Fat_S239	Fat
+Starch_S231	Starch

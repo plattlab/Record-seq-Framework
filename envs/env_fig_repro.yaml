@@ -1,0 +1,11 @@
+name: recordseq-fig-repro
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    - fuzzysearch==0.8.0
+    - pywfa==0.5.1

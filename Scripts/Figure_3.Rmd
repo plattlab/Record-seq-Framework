@@ -1,0 +1,375 @@
+---
+title: "Reproduction of Figure 3"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 2
+    toc_float: yes
+    number_sections: yes
+    code_folding: show
+---
+
+# Setup and Libraries
+
+```{r message=FALSE, warning=FALSE}
+library(recoRdseq)
+library(SummarizedExperiment)
+library(S4Vectors)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(ggrepel)
+library(grid)
+
+input_file <- knitr::current_input(dir = TRUE)
+if (is.null(input_file) || !nzchar(input_file)) {
+  script_dir <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+} else {
+  script_dir <- dirname(normalizePath(input_file, winslash = "/", mustWork = TRUE))
+}
+project_dir <- normalizePath(file.path(script_dir, ".."), winslash = "/", mustWork = TRUE)
+
+Fig.Folder <- file.path(project_dir, "Outputs", "Figure_3")
+dir.create(Fig.Folder, recursive = TRUE, showWarnings = FALSE)
+
+input_dir <- file.path(project_dir, "Inputs")
+meta_file <- file.path(input_dir, "metaData.txt")
+counts_gene_file <- file.path(input_dir, "genomeCounts.txt")
+counts_tu_file <- file.path(input_dir, "genomeCounts_TU.txt")
+summary_gene_file <- file.path(input_dir, "genomeCounts.txt.summary")
+summary_tu_file <- file.path(input_dir, "genomeCounts_TU.txt.summary")
+map_file <- file.path(input_dir, "TU_gene_mapping.tsv")
+
+stopifnot(file.exists(meta_file), file.exists(counts_gene_file), file.exists(counts_tu_file),
+          file.exists(summary_gene_file), file.exists(summary_tu_file), file.exists(map_file))
+
+cat("Project directory:", project_dir, "\n")
+cat("Figure output directory:", Fig.Folder, "\n")
+
+method_palette <- c("Gene-based" = "#542ABC", "TU-based" = "#ABC542")
+treatment_palette <- c("Starch" = "#42bb7f", "Fat" = "#ed915c")
+```
+
+# 1. Build Two recoRdseq Objects
+
+```{r message=FALSE, warning=FALSE}
+# Object 1: genomeCounts (gene-resolution)
+rec_gene <- recoRdseq.input(
+  genome_counts = counts_gene_file,
+  sample_metadata = meta_file
+)
+
+# Object 2: genomeCounts_TU (TU-resolution)
+rec_tu <- recoRdseq.input(
+  genome_counts = counts_tu_file,
+  sample_metadata = meta_file
+)
+
+# Force explicit contrast direction: Fat vs Starch (Starch is reference)
+colData(rec_gene)$Treatment <- factor(as.character(colData(rec_gene)$Treatment), levels = c("Starch", "Fat"))
+colData(rec_tu)$Treatment <- factor(as.character(colData(rec_tu)$Treatment), levels = c("Starch", "Fat"))
+
+# Preprocess and transform each object
+rec_gene_pp <- recoRdseq.preprocess(
+  rec_gene,
+  min_sample_counts = 3000,
+  remove_low_count_feature_percent = 25,
+  group_by = "Treatment",
+  outlier_z_threshold = 3,
+  outlier_z_method = "median",
+  outlier_side = "low",
+  outlier_min_deficit_fraction = 0.25
+)
+
+rec_tu_pp <- recoRdseq.preprocess(
+  rec_tu,
+  min_sample_counts = 1000,
+  remove_low_count_feature_percent = 25,
+  group_by = "Treatment",
+  outlier_z_threshold = 3,
+  outlier_z_method = "median",
+  outlier_side = "low",
+  outlier_min_deficit_fraction = 0.25
+)
+
+rec_gene_norm <- recoRdseq.transform(rec_gene_pp, method = "rlog", normalize_by = "Treatment")
+rec_tu_norm <- recoRdseq.transform(rec_tu_pp, method = "rlog", normalize_by = "Treatment")
+
+cat("Gene object dimensions:", nrow(rec_gene_norm), "features x", ncol(rec_gene_norm), "samples\n")
+cat("TU object dimensions:", nrow(rec_tu_norm), "features x", ncol(rec_tu_norm), "samples\n")
+```
+
+# 2. Figure 3A: Assigned Spacer Counts (Gene vs TU)
+
+```{r message=FALSE, warning=FALSE}
+summary_gene <- read.delim(summary_gene_file, check.names = FALSE)
+summary_tu <- read.delim(summary_tu_file, check.names = FALSE)
+
+assigned_gene <- summary_gene %>%
+  dplyr::filter(Status == "Assigned") %>%
+  tidyr::pivot_longer(cols = -Status, names_to = "Sequencing_ID", values_to = "assigned_counts") %>%
+  dplyr::mutate(Method = "Gene-based")
+
+assigned_tu <- summary_tu %>%
+  dplyr::filter(Status == "Assigned") %>%
+  tidyr::pivot_longer(cols = -Status, names_to = "Sequencing_ID", values_to = "assigned_counts") %>%
+  dplyr::mutate(Method = "TU-based")
+
+meta_tbl <- as.data.frame(colData(rec_gene))
+meta_tbl$Sequencing_ID <- rownames(meta_tbl)
+
+assigned_all <- dplyr::bind_rows(assigned_gene, assigned_tu) %>%
+  dplyr::left_join(meta_tbl %>% dplyr::select(Sequencing_ID, Treatment), by = "Sequencing_ID")
+
+assigned_stats <- assigned_all %>%
+  dplyr::group_by(Method) %>%
+  dplyr::summarise(
+    mean_counts = mean(assigned_counts, na.rm = TRUE),
+    sd_counts = sd(assigned_counts, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+p_3a <- ggplot(assigned_stats, aes(x = Method, y = mean_counts, fill = Method)) +
+  geom_col(width = 0.72) +
+  geom_errorbar(aes(ymin = pmax(0, mean_counts - sd_counts), ymax = mean_counts + sd_counts),
+                width = 0.18, linewidth = 0.6) +
+  scale_fill_manual(values = method_palette, drop = FALSE) +
+  labs(x = NULL, y = "Assigned spacers") +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "none")
+
+grDevices::pdf(file.path(Fig.Folder, "Figure_3A.pdf"), width = 2.4, height = 5.8, pointsize = 14)
+print(p_3a)
+dev.off()
+
+p_3a_sample <- ggplot(assigned_all, aes(x = Sequencing_ID, y = assigned_counts, fill = Method)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.72) +
+  facet_wrap(~Treatment, scales = "free_x") +
+  scale_fill_manual(values = method_palette, drop = FALSE) +
+  labs(x = "Sample", y = "Assigned spacers", fill = "Method") +
+  theme_bw(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+grDevices::pdf(file.path(Fig.Folder, "Figure_3A_perSample.pdf"), width = 8.6, height = 5.6, pointsize = 12)
+print(p_3a_sample)
+dev.off()
+```
+
+# 3. Differential Abundance with recoRdseq (DESeq2 + edgeR)
+
+```{r message=FALSE, warning=FALSE}
+rec_gene_de <- recoRdseq.DE(
+  rec_gene_norm,
+  model_design = "~Treatment",
+  de_methods = c("DESeq2", "edgeR"),
+  compare_by = "Treatment",
+  deseq2_test = "Wald"
+)
+
+rec_tu_de <- recoRdseq.DE(
+  rec_tu_norm,
+  model_design = "~Treatment",
+  de_methods = c("DESeq2", "edgeR"),
+  compare_by = "Treatment",
+  deseq2_test = "Wald"
+)
+
+gene_deseq <- as.data.frame(metadata(rec_gene_de)$DESeq2_results)
+gene_edger <- as.data.frame(metadata(rec_gene_de)$edgeR_results)
+tu_deseq <- as.data.frame(metadata(rec_tu_de)$DESeq2_results)
+tu_edger <- as.data.frame(metadata(rec_tu_de)$edgeR_results)
+
+knitr::kable(head(gene_deseq, 8), caption = "Gene-based DESeq2 head")
+knitr::kable(head(tu_deseq, 8), caption = "TU-based DESeq2 head")
+
+write.csv(gene_deseq[order(gene_deseq$pvalue), ],
+          file.path(Fig.Folder, "DESeq2_Gene_based_Fat_vs_Starch_sorted_by_pvalue.csv"),
+          row.names = FALSE)
+write.csv(tu_deseq[order(tu_deseq$pvalue), ],
+          file.path(Fig.Folder, "DESeq2_TU_based_Fat_vs_Starch_sorted_by_pvalue.csv"),
+          row.names = FALSE)
+
+write.csv(gene_edger[order(gene_edger$PValue), ],
+          file.path(Fig.Folder, "edgeR_Gene_based_Fat_vs_Starch_sorted_by_pvalue.csv"),
+          row.names = FALSE)
+write.csv(tu_edger[order(tu_edger$PValue), ],
+          file.path(Fig.Folder, "edgeR_TU_based_Fat_vs_Starch_sorted_by_pvalue.csv"),
+          row.names = FALSE)
+```
+
+# 4. Plots
+
+```{r message=FALSE, warning=FALSE}
+gene_deg_intersect <- recoRdseq.filterDEG(
+  rec_gene_de,
+  de_methods = c("DESeq2", "edgeR"),
+  combine_methods = "intersect",
+  max_adjusted_p_value = 0.05
+)
+
+tu_deg_intersect <- recoRdseq.filterDEG(
+  rec_tu_de,
+  de_methods = c("DESeq2", "edgeR"),
+  combine_methods = "intersect",
+  max_adjusted_p_value = 0.05
+)
+
+cat("Gene intersect DEGs:", length(gene_deg_intersect), "\n")
+cat("TU intersect DEGs:", length(tu_deg_intersect), "\n")
+
+# Volcano (DESeq2 coordinates)
+p_gene_volcano <- recoRdseq.plot(
+  rec_gene_de,
+  plot_types = "volcano",
+  color_by = "Treatment",
+  volcano_de_method = "DESeq2",
+  max_adjusted_p_value = 0.05,
+  min_abs_log2_fold_change = 0.5,
+  group_color_map = treatment_palette
+)$volcano
+
+p_tu_volcano <- recoRdseq.plot(
+  rec_tu_de,
+  plot_types = "volcano",
+  color_by = "Treatment",
+  volcano_de_method = "DESeq2",
+  max_adjusted_p_value = 0.05,
+  min_abs_log2_fold_change = 0.5,
+  group_color_map = treatment_palette
+)$volcano
+
+grDevices::pdf(file.path(Fig.Folder, "Figure_3_Gene_volcano.pdf"), width = 6.2, height = 5.4, pointsize = 12)
+print(p_gene_volcano)
+dev.off()
+
+grDevices::pdf(file.path(Fig.Folder, "Figure_3_TU_volcano.pdf"), width = 6.2, height = 5.4, pointsize = 12)
+print(p_tu_volcano)
+dev.off()
+
+# Heatmaps from intersection hits
+p_gene_heatmap <- recoRdseq.plotHeatmap(
+  rec_gene_de,
+  color_by = "Treatment",
+  heatmap_feature_source = "deg",
+  heatmap_de_methods = c("DESeq2", "edgeR"),
+  heatmap_combine_methods = "intersect",
+  heatmap_max_adjusted_p_value = 0.05,
+  heatmap_n_features = 40,
+  group_color_map = treatment_palette
+)
+
+p_tu_heatmap <- recoRdseq.plotHeatmap(
+  rec_tu_de,
+  color_by = "Treatment",
+  heatmap_feature_source = "deg",
+  heatmap_de_methods = c("DESeq2", "edgeR"),
+  heatmap_combine_methods = "intersect",
+  heatmap_max_adjusted_p_value = 0.05,
+  heatmap_n_features = 40,
+  group_color_map = treatment_palette
+)
+
+grDevices::pdf(file.path(Fig.Folder, "Figure_3_Gene_heatmap.pdf"), width = 5.6, height = 7.2, pointsize = 12)
+grid::grid.newpage()
+grid::grid.draw(p_gene_heatmap$gtable)
+dev.off()
+
+grDevices::pdf(file.path(Fig.Folder, "Figure_3_TU_heatmap.pdf"), width = 5.6, height = 7.2, pointsize = 12)
+grid::grid.newpage()
+grid::grid.draw(p_tu_heatmap$gtable)
+dev.off()
+
+# Feature plots from top intersection hits
+gene_feature_ids <- head(gene_deg_intersect, 10)
+if (length(gene_feature_ids) == 0) {
+  gene_feature_ids <- head(rownames(assay(rec_gene_de, "normCounts")), 10)
+}
+
+p_gene_features <- recoRdseq.plotFeatures(
+  rec_gene_de,
+  feature_ids = gene_feature_ids,
+  color_by = "Treatment",
+  group_color_map = treatment_palette
+)
+
+grDevices::pdf(file.path(Fig.Folder, "Figure_3_Gene_features.pdf"), width = 8.2, height = 5.8, pointsize = 12)
+print(p_gene_features)
+dev.off()
+
+tu_feature_ids <- head(tu_deg_intersect, 10)
+if (length(tu_feature_ids) == 0) {
+  tu_feature_ids <- head(rownames(assay(rec_tu_de, "normCounts")), 10)
+}
+
+p_tu_features <- recoRdseq.plotFeatures(
+  rec_tu_de,
+  feature_ids = tu_feature_ids,
+  color_by = "Treatment",
+  group_color_map = treatment_palette
+)
+
+grDevices::pdf(file.path(Fig.Folder, "Figure_3_TU_features.pdf"), width = 8.2, height = 5.8, pointsize = 12)
+print(p_tu_features)
+dev.off()
+```
+
+# 5. Figure 3B: TU vs Gene Significance Comparison
+
+```{r message=FALSE, warning=FALSE}
+tu_map_raw <- readr::read_tsv(map_file, show_col_types = FALSE)
+
+tu_map_long <- tu_map_raw %>%
+  dplyr::transmute(TU = trimws(as.character(Name)), Genes = as.character(Genes)) %>%
+  tidyr::separate_rows(Genes, sep = ",") %>%
+  dplyr::mutate(geneID = trimws(Genes)) %>%
+  dplyr::select(geneID, TU) %>%
+  dplyr::filter(nzchar(geneID), nzchar(TU)) %>%
+  dplyr::distinct()
+
+gene_sig <- gene_deseq %>% dplyr::select(geneID, padj_gene = padj)
+tu_sig <- tu_deseq %>% dplyr::transmute(TU = geneID, padj_tu = padj)
+
+plot_df <- tu_map_long %>%
+  dplyr::inner_join(gene_sig, by = "geneID") %>%
+  dplyr::inner_join(tu_sig, by = "TU") %>%
+  dplyr::filter(!is.na(padj_gene), !is.na(padj_tu), padj_gene > 0, padj_tu > 0) %>%
+  dplyr::mutate(
+    neglog10_padj_gene = -log10(padj_gene),
+    neglog10_padj_tu = -log10(padj_tu)
+  )
+
+tus_to_highlight <- c("fruBKA", "kdgT", "caiTABCDE")
+plot_df_high <- plot_df %>%
+  dplyr::filter(TU %in% tus_to_highlight) %>%
+  dplyr::mutate(gene_label = gsub("\\d+$", "", gsub("_.*$", "", geneID)))
+
+max_lim <- max(plot_df$neglog10_padj_gene, plot_df$neglog10_padj_tu, -log10(0.05), na.rm = TRUE)
+
+p_3b <- ggplot(plot_df, aes(x = neglog10_padj_gene, y = neglog10_padj_tu)) +
+  geom_point(alpha = 0.65, size = 2, color = "black") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", linewidth = 0.7) +
+  geom_point(data = plot_df_high, color = "darkred", size = 2.2) +
+  ggrepel::geom_text_repel(
+    data = plot_df_high,
+    aes(label = gene_label),
+    color = "darkred",
+    size = 4.2,
+    box.padding = 0.4,
+    point.padding = 0,
+    min.segment.length = 0,
+    seed = 1
+  ) +
+  coord_cartesian(xlim = c(0, max_lim), ylim = c(0, max_lim)) +
+  labs(
+    x = expression(-log[10]("padj (gene-based)")),
+    y = expression(-log[10]("padj (TU-based)")),
+    title = ""
+  ) +
+  theme_bw(base_size = 14)
+
+grDevices::pdf(file.path(Fig.Folder, "Figure_3B.pdf"), width = 4.2, height = 6, pointsize = 14)
+print(p_3b)
+dev.off()
+```
