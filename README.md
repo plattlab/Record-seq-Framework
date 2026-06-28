@@ -1,6 +1,6 @@
 # An End To End Computational Framework for Record-seq Transcriptional Recording Data
 
-This repository provides the computational framework and benchmarking scripts required to reproduce the results presented in: **"An End-To-End Computational Framework for 'Record-seq' Transcriptional Recording Data"** (doi placeholer).
+This repository provides the computational framework and benchmarking scripts required to reproduce the results presented in: **"An End-To-End Computational Framework for 'Record-seq' Transcriptional Recording Data"** (*Bioinformatics* 2026).
 
 ## Framework Description
 
@@ -21,15 +21,15 @@ The Record-seq software ecosystem is partitioned into three modules:
 
 ## Reproduction of Figures
 
-The `scripts/` directory contains the code required to reproduce the specific computational benchmarks described in the manuscript.
+The `Scripts/` directory contains the code required to reproduce the specific computational benchmarks described in the manuscript.
 
-* **Figure 2 (Runtime Performance):** Benchmarks the WFA2-based `PatternBoundExtractor` against previous fuzzysearch methods to demonstrate improved scalability. **Implementation:** `placeholder.py`.
-* **Figure 3 (TU-based Feature Counting):** Compares signal recovery and statistical power between transcription unit (TU) and gene-body-centric quantification. **Implementation:** `placeholder.Rmd`.
+* **Figure 2 (Runtime Performance):** Benchmarks the WFA2-based `PatternBoundExtractor` against previous fuzzysearch methods to demonstrate improved scalability. **Implementation:** `Scripts/Figure_2_experiment.py` and `Scripts/Figure_2_plots.Rmd`.
+* **Figure 3 (TU-based Feature Counting):** Compares signal recovery and statistical power between transcription unit (TU) and gene-body-centric quantification. **Implementation:** `Scripts/Figure_3.Rmd`.
 * **Figure 4 (Acquisition Bias Modelling):** Scripts for normalized profile analysis and model evaluation are hosted within the **[Spacer Acquisition Modelling](https://github.com/plattlab/Spacer-Acquisition-Modelling)** repository.
 
 ## Installation for Figure Reconstruction
 
-Use these instructions to establish the environment required to run the figure reconstruction and benchmarking scripts located in the `scripts/` directory.
+Use these instructions to establish the environment required to run the figure reconstruction and benchmarking scripts located in the `Scripts/` directory.
 
 ```bash
 # Clone the repository
@@ -46,4 +46,4 @@ conda activate recordseq-fig-repro
 Please cite the following publication when using this framework:
 
 > **"An End-To-End Computational Framework for 'Record-seq' Transcriptional Recording Data"**
-> *Journal placeholder* 
+> *Bioinformatics 2026* 
